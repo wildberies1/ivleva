@@ -859,19 +859,19 @@
             <p>Тысячи прекрасных девушек ждут именно тебя. Всё, что нужно - это одна шаурма!</p>
             <div class="search-box">
                 <input type="text" id="searchInput" placeholder="Поиск по имени, возрасту...">
-                <button onclick="searchModels()"><i class="fas fa-search"></i> Найти</button>
+                <button onclick="searchModels()" data-track="search"><i class="fas fa-search"></i> Найти</button>
             </div>
         </div>
     </section>
 
     <!-- Filters -->
     <div class="filters">
-        <button class="filter-btn active" onclick="filterByAge('all')">Все возрасты</button>
-        <button class="filter-btn" onclick="filterByAge('18-25')">18-25 лет</button>
-        <button class="filter-btn" onclick="filterByAge('26-35')">26-35 лет</button>
-        <button class="filter-btn" onclick="filterByAge('35+')">35+ лет</button>
-        <button class="filter-btn" onclick="sortBy('price')">По цене</button>
-        <button class="filter-btn" onclick="sortBy('age')">По возрасту</button>
+        <button class="filter-btn active" onclick="filterByAge('all')" data-track="filter">Все возрасты</button>
+        <button class="filter-btn" onclick="filterByAge('18-25')" data-track="filter">18-25 лет</button>
+        <button class="filter-btn" onclick="filterByAge('26-35')" data-track="filter">26-35 лет</button>
+        <button class="filter-btn" onclick="filterByAge('35+')" data-track="filter">35+ лет</button>
+        <button class="filter-btn" onclick="sortBy('price')" data-track="sort">По цене</button>
+        <button class="filter-btn" onclick="sortBy('age')" data-track="sort">По возрасту</button>
     </div>
 
     <!-- Main Content -->
@@ -892,7 +892,7 @@
     <!-- Modal -->
     <div class="modal-overlay" id="modalOverlay" onclick="closeModalOnOverlay(event)">
         <div class="modal-content" onclick="event.stopPropagation()">
-            <button class="modal-close" onclick="closeModal()"><i class="fas fa-times"></i></button>
+            <button class="modal-close" onclick="closeModal()" data-track="close-modal"><i class="fas fa-times"></i></button>
             <div class="modal-body" id="modalBody">
                 <!-- Dynamic content -->
             </div>
@@ -933,31 +933,120 @@
         let allModels = [];
         let currentFilter = 'all';
         let currentSort = null;
+        let userSessionId = null;
+        let userIP = null;
 
         // Load models on page load
         document.addEventListener('DOMContentLoaded', () => {
+            initUserSession();
             loadModels();
             logVisit();
             updateStats();
+            setupActionTracking();
         });
 
-        // Log visit
-        function logVisit() {
+        // Initialize user session
+        function initUserSession() {
+            userSessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            
+            // Get user IP
             fetch('https://api.ipify.org?format=json')
                 .then(response => response.json())
                 .then(data => {
-                    const visitData = {
-                        ip: data.ip,
+                    userIP = data.ip;
+                    
+                    // Create session in Firebase
+                    database.ref(`userActions/${userSessionId}`).set({
+                        ip: userIP,
                         userAgent: navigator.userAgent,
                         device: getDeviceType(),
                         browser: getBrowserName(),
-                        timestamp: firebase.database.ServerValue.TIMESTAMP,
-                        date: new Date().toLocaleString()
-                    };
-                    
-                    database.ref('visits').push(visitData);
+                        startTime: firebase.database.ServerValue.TIMESTAMP,
+                        actions: []
+                    });
                 })
                 .catch(err => console.log('IP fetch error:', err));
+        }
+
+        // Track user action
+        function trackAction(actionType, details = {}) {
+            if (!userSessionId) return;
+
+            const action = {
+                type: actionType,
+                timestamp: firebase.database.ServerValue.TIMESTAMP,
+                time: new Date().toLocaleTimeString(),
+                ...details
+            };
+
+            database.ref(`userActions/${userSessionId}/actions`).push(action);
+        }
+
+        // Setup action tracking
+        function setupActionTracking() {
+            // Track all button clicks
+            document.addEventListener('click', (e) => {
+                const target = e.target.closest('button, a, .model-card');
+                if (!target) return;
+
+                const trackData = target.dataset.track;
+                if (trackData) {
+                    trackAction('click', {
+                        target: trackData,
+                        element: target.tagName,
+                        text: target.textContent.trim().substring(0, 50)
+                    });
+                }
+            });
+
+            // Track form submissions
+            document.addEventListener('submit', (e) => {
+                trackAction('form_submit', {
+                    form: e.target.id || 'unknown'
+                });
+            });
+
+            // Track scroll depth
+            let maxScroll = 0;
+            window.addEventListener('scroll', () => {
+                const scrollPercent = Math.round((window.scrollY / (document.documentElement.scrollHeight - window.innerHeight)) * 100);
+                if (scrollPercent > maxScroll) {
+                    maxScroll = scrollPercent;
+                    if (scrollPercent % 25 === 0) { // Track every 25%
+                        trackAction('scroll', {
+                            depth: scrollPercent + '%'
+                        });
+                    }
+                }
+            });
+
+            // Track page visibility
+            document.addEventListener('visibilitychange', () => {
+                trackAction('visibility', {
+                    state: document.visibilityState
+                });
+            });
+
+            // Track time spent
+            setInterval(() => {
+                trackAction('heartbeat', {
+                    timestamp: Date.now()
+                });
+            }, 60000); // Every minute
+        }
+
+        // Log visit
+        function logVisit() {
+            const visitData = {
+                ip: userIP,
+                userAgent: navigator.userAgent,
+                device: getDeviceType(),
+                browser: getBrowserName(),
+                timestamp: firebase.database.ServerValue.TIMESTAMP,
+                date: new Date().toLocaleString()
+            };
+            
+            database.ref('visits').push(visitData);
         }
 
         function getDeviceType() {
@@ -1006,7 +1095,7 @@
             }
 
             grid.innerHTML = models.map(model => `
-                <div class="model-card" onclick="openModal('${model.id}')">
+                <div class="model-card" onclick="openModal('${model.id}')" data-track="view-card" data-model="${model.name}">
                     <div class="card-image-wrapper">
                         <img src="${model.photo || 'https://via.placeholder.com/400x500?text=No+Photo'}" 
                              alt="${model.name}" 
@@ -1037,10 +1126,10 @@
                                 <span>за свидание</span>
                             </div>
                             <div class="card-actions">
-                                <button class="btn-icon" onclick="event.stopPropagation(); likeModel('${model.id}')" title="Лайк">
+                                <button class="btn-icon" onclick="event.stopPropagation(); likeModel('${model.id}')" data-track="like" data-model="${model.name}" title="Лайк">
                                     <i class="fas fa-heart"></i>
                                 </button>
-                                <button class="btn-icon" onclick="event.stopPropagation(); bookModel('${model.id}', '${model.name}')" title="Забронировать">
+                                <button class="btn-icon" onclick="event.stopPropagation(); bookModel('${model.id}', '${model.name}')" data-track="book" data-model="${model.name}" title="Забронировать">
                                     <i class="fas fa-calendar-check"></i>
                                 </button>
                             </div>
@@ -1054,6 +1143,11 @@
         function openModal(modelId) {
             const model = allModels.find(m => m.id === modelId);
             if (!model) return;
+
+            trackAction('open_modal', {
+                modelName: model.name,
+                modelId: model.id
+            });
 
             const modalBody = document.getElementById('modalBody');
             const reviews = model.reviews ? Object.values(model.reviews) : [];
@@ -1081,10 +1175,10 @@
                     </div>
                     
                     <div class="modal-actions">
-                        <button class="btn-primary" onclick="bookModel('${model.id}', '${model.name}')">
+                        <button class="btn-primary" onclick="bookModel('${model.id}', '${model.name}')" data-track="book-modal" data-model="${model.name}">
                             <i class="fas fa-calendar-check"></i> Забронировать
                         </button>
-                        <button class="btn-secondary" onclick="likeModel('${model.id}')">
+                        <button class="btn-secondary" onclick="likeModel('${model.id}')" data-track="like-modal" data-model="${model.name}">
                             <i class="fas fa-heart"></i> Нравится
                         </button>
                     </div>
@@ -1101,7 +1195,7 @@
                                 <label>Ваш отзыв</label>
                                 <textarea id="reviewText" rows="3" placeholder="Напишите отзыв..."></textarea>
                             </div>
-                            <button class="btn-primary" onclick="addReview('${model.id}')">
+                            <button class="btn-primary" onclick="addReview('${model.id}')" data-track="submit-review" data-model="${model.name}">
                                 <i class="fas fa-paper-plane"></i> Отправить отзыв
                             </button>
                         </div>
@@ -1127,6 +1221,7 @@
 
         // Close modal
         function closeModal() {
+            trackAction('close_modal');
             document.getElementById('modalOverlay').classList.remove('active');
             document.body.style.overflow = 'auto';
         }
@@ -1139,6 +1234,11 @@
 
         // Book model
         function bookModel(modelId, modelName) {
+            trackAction('booking', {
+                modelId: modelId,
+                modelName: modelName
+            });
+
             const booking = {
                 modelId: modelId,
                 modelName: modelName,
@@ -1159,6 +1259,13 @@
 
         // Like model
         function likeModel(modelId) {
+            const model = allModels.find(m => m.id === modelId);
+            
+            trackAction('like', {
+                modelId: modelId,
+                modelName: model ? model.name : 'Unknown'
+            });
+
             const modelRef = database.ref(`models/${modelId}`);
             
             modelRef.transaction(model => {
@@ -1180,6 +1287,14 @@
                 showToast('Заполните все поля', 'error');
                 return;
             }
+
+            const model = allModels.find(m => m.id === modelId);
+            
+            trackAction('review', {
+                modelId: modelId,
+                modelName: model ? model.name : 'Unknown',
+                reviewText: text.substring(0, 100)
+            });
 
             const review = {
                 name: name,
@@ -1203,6 +1318,10 @@
         function searchModels() {
             const query = document.getElementById('searchInput').value.toLowerCase();
             
+            trackAction('search', {
+                query: query
+            });
+
             const filtered = allModels.filter(model => 
                 model.name.toLowerCase().includes(query) ||
                 model.age.toString().includes(query) ||
@@ -1216,6 +1335,10 @@
         function filterByAge(range) {
             currentFilter = range;
             
+            trackAction('filter', {
+                filter: range
+            });
+
             // Update active button
             document.querySelectorAll('.filter-btn').forEach(btn => {
                 btn.classList.remove('active');
@@ -1244,6 +1367,11 @@
         // Sort models
         function sortBy(field) {
             currentSort = field;
+            
+            trackAction('sort', {
+                sortBy: field
+            });
+
             let filtered = [...allModels];
 
             if (currentFilter !== 'all') {
@@ -1300,6 +1428,15 @@
         document.getElementById('searchInput')?.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 searchModels();
+            }
+        });
+
+        // Track page leave
+        window.addEventListener('beforeunload', () => {
+            if (userSessionId) {
+                trackAction('page_leave', {
+                    timestamp: Date.now()
+                });
             }
         });
     </script>
